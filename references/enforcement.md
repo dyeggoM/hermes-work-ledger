@@ -49,6 +49,10 @@ hook is registered but never fires, and `hermes hooks doctor` is the only thing 
 ✗ not allowlisted — hook will NOT fire at runtime
 ```
 
+That line is about the allowlist file, not the config opt-in: with `hooks_auto_accept: true` the hook
+does fire even while `hooks doctor` still reports it as un-allowlisted (measured — the block landed).
+Treat the doctor's message as "no approval recorded", and confirm enforcement with a real turn.
+
 Run `hermes hooks doctor` (with the profile's `HERMES_HOME`) after wiring, and again after editing
 the hook: an approval is tied to the script's mtime, so a changed script is a new script.
 
