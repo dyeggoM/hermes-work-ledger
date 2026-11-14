@@ -48,6 +48,18 @@ makes aggressive purging safe.
 
 The unit is the **task**, and its state is *derived from events*, never typed in by hand.
 
+## Making it a rule, not a suggestion
+
+A `pre_tool_call` shell hook (`scripts/ledger_guard_hook.py`) blocks `write_file`, `patch` and shell
+`git commit|push` while the bot has no open task in the scope, and the block message carries the
+command that fixes it. Wire it per profile with `scripts/install-enforcement.sh <profile>...`; the
+config block, the `hooks_auto_accept` requirement and the failure modes are in
+`references/enforcement.md`.
+
+Enforce in this order: create the ledger and record the standing work first, put the rule in the
+files the bot reads (`AGENTS.md`, `HANDOVER.md`/`SOUL.md`) second, wire the hook last. A hook that
+fires before the ledger exists teaches the bot to argue with it.
+
 ## The ledger: one file per scope and agent
 
 `<dir>/<scope>.<agent>.db` (`<scope>.db` when the agent is `default`) — SQLite, one file, driven by
