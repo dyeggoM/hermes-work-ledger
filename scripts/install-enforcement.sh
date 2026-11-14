@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install the work-ledger guard as a Hermes shell hook for one or more profiles.
 #
-#   ./scripts/install-enforcement.sh opencode-coder openai-coder
+#   ./scripts/install-enforcement.sh bot-a bot-b
 #   HERMES_HOME_DIR=$HOME/.hermes ./scripts/install-enforcement.sh --all
 #
 # Copies ledger_guard_hook.py into ~/.hermes/scripts, then adds the hooks block to each profile's

@@ -12,8 +12,13 @@ set -euo pipefail
 self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ledger_py="${LEDGER_PY:-}"
 if [[ -z "$ledger_py" ]]; then
-  if [[ -f "$self_dir/ledger.py" ]]; then ledger_py="$self_dir/ledger.py"
-  else ledger_py="$HOME/.hermes/repos/hermes-work-ledger/scripts/ledger.py"; fi
+  if [[ -f "$self_dir/ledger.py" ]]; then
+    ledger_py="$self_dir/ledger.py"                       # installed next to the CLI
+  elif [[ -f "$HOME/.hermes/repos/hermes-work-ledger/scripts/ledger.py" ]]; then
+    ledger_py="$HOME/.hermes/repos/hermes-work-ledger/scripts/ledger.py"   # the usual checkout
+  else
+    echo "ledger: cannot find ledger.py; set LEDGER_PY" >&2; exit 1
+  fi
 fi
 
 scope="${LEDGER_SCOPE:-}"
@@ -23,4 +28,11 @@ if [[ -z "$scope" ]]; then
   [[ -n "$scope" ]] || scope="$(basename "$root")"
 fi
 
-exec python3 "$ledger_py" --dir "${LEDGER_DIR:-$HOME/.hermes/ledgers}" --scope "$scope" "$@"
+# One ledger directory for every profile on the host: HERMES_HOME inside a bot points at the profile,
+# whose ledgers live under the shared home one level up from profiles/.
+hermes_home="${HERMES_HOME:-$HOME/.hermes}"
+if [[ "$hermes_home" == */profiles/* ]]; then
+  hermes_home="$(cd "$hermes_home/../.." && pwd)"
+fi
+
+exec python3 "$ledger_py" --dir "${LEDGER_DIR:-$hermes_home/ledgers}" --scope "$scope" "$@"

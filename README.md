@@ -11,6 +11,29 @@ It is not the agent's own memory of the conversation. It is the memory of the **
 the requester's own words, the decisions and their reasons, the evidence for what was finished, and
 the dead ends so they are not explored twice.
 
+## Install
+
+```bash
+./scripts/install.sh          # symlink the skill into the skills dir, install the CLI and the hook
+./scripts/install.sh --copy   # copy the skill instead of symlinking it
+HERMES_HOME_DIR=/srv/hermes ./scripts/install.sh
+```
+
+Everything lands under the Hermes home (`~/.hermes` by default), so no path in this repository is
+specific to one machine:
+
+```
+<hermes-home>/scripts/ledger                 the wrapper every agent calls
+<hermes-home>/scripts/ledger_impl.py         the CLI
+<hermes-home>/scripts/ledger_guard_hook.py   the pre_tool_call guard
+<hermes-home>/ledgers/                       one SQLite per scope and agent
+<hermes-home>/skills/personal/work-ledger    this skill
+```
+
+The wrapper takes the scope from the repository name and the agent from the profile, so an agent
+never passes either. `LEDGER_DIR`, `LEDGER_SCOPE`, `LEDGER_PY`, `LEDGER_CLI` and `HERMES_PROFILE`
+override the defaults when a host lays things out differently.
+
 ## Layout
 
 ```
@@ -19,9 +42,13 @@ references/ledger-schema.md     DDL, open/lock/migration, the CLI surface, the p
 references/prompt-compact.md    the summarizer contract, including the "never invent completion" guard
 references/anti-patterns.md     twelve measured failure modes and the fix for each
 references/rollout-phases.md    adoption order, the purge test and the isolation test
+references/enforcement.md       the guard: config, rollout order, and what does not fire
 scripts/ledger.py               reference implementation (stdlib only, Python 3.10+)
-tests/test_ledger.py            11 tests: verbatim requests, evidence-required results, redaction,
-                                bounded pack, FTS search, scope isolation, integrity check
+scripts/ledger                  wrapper: central dir, scope from the repository
+scripts/install.sh              CLI + hook + skill into a Hermes home
+scripts/install-enforcement.sh  wire the hook into one or more profiles
+tests/test_ledger.py            18 tests: verbatim requests, evidence-required results, redaction,
+                                bounded pack, FTS search, scope and agent isolation, integrity check
 ```
 
 ## Enforcement
@@ -37,9 +64,9 @@ fired on this host: `references/enforcement.md` has the measurements and the rol
 
 ## Why per scope *and* per agent, and why both sides
 
-- **Per (scope, agent).** One file per repository *and* per bot: `imc.orchestrator.db` next to
-  `imc.opencode-coder.db`. Pooling them means each bot sees the other's tasks as its own open work,
-  and "what did I do" has no answer. `ledger team --scope imc` prints every agent's open work for the
+- **Per (scope, agent).** One file per repository *and* per bot: `my-service.lead.db` next to
+  `my-service.worker.db`. Pooling them means each bot sees the other's tasks as its own open work,
+  and "what did I do" has no answer. `ledger team --scope my-service` prints every agent's open work for the
   scope without merging the memories.
 - **Both sides.** Requests only and the agent redoes work and re-proposes rejected designs. Actions
   only and it cannot tell finished from abandoned. The pair is what makes the record usable.
@@ -59,13 +86,13 @@ $L resume                                               # the pack a fresh sessi
 $L check                                                # integrity: evidence, secrets, stale work
 
 # one bot per ledger, same repository
-python3 scripts/ledger.py --scope imc --agent code-orchestrator request "priorizar el round"
-python3 scripts/ledger.py --scope imc --agent code-orchestrator resume
-python3 scripts/ledger.py --scope imc team               # every agent's open work, side by side
+python3 scripts/ledger.py --scope my-service --agent lead request "prioritise the round"
+python3 scripts/ledger.py --scope my-service --agent lead resume
+python3 scripts/ledger.py --scope my-service team          # every agent's open work, side by side
 
 # capacity: one number, default 80 items, stored per ledger
-python3 scripts/ledger.py --scope imc --agent code-orchestrator init --items 200
-python3 scripts/ledger.py --scope imc --agent code-orchestrator resume --items 40   # one-off
+python3 scripts/ledger.py --scope my-service --agent lead init --items 200
+python3 scripts/ledger.py --scope my-service --agent lead resume --items 40   # one-off
 ```
 
 `result` refuses to run without `--evidence`, and `check` fails a task marked done without one. That
@@ -74,7 +101,7 @@ asymmetry is deliberate: "done" is a claim, the artifact is proof.
 ## What the pack looks like
 
 ```
-# Ledger · my-project · code-orchestrator
+# Ledger · my-project · lead
 
 2 open · 3 recently closed · up to 80 items · pack 12800 chars
 
