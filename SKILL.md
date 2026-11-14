@@ -36,8 +36,8 @@ makes aggressive purging safe.
 - *Scope* is the unit that owns its own commitments: a repository, a deployment, a client. One ledger
   per scope, never one global file — two projects in one ledger means a request for A shows up as
   pending while working on B, and a decision taken for A silently constrains B.
-- *Agent* is who is doing the work. A ledger is per **(scope, agent)** pair: `imc.orchestrator.db`,
-  `imc.opencode-coder.db`. Two bots on one repository that share a ledger see each other's tasks as
+- *Agent* is who is doing the work. A ledger is per **(scope, agent)** pair: `my-service.lead.db`,
+  `my-service.worker.db`. Two bots on one repository that share a ledger see each other's tasks as
   their own open work and answering "what did *I* do" becomes impossible; the same applies to a worker
   and the bot that reviews it. `ledger team` is the read-only view across agents for one scope, which
   is how the orchestrator sees what each bot is carrying without pooling their memory.

@@ -7,7 +7,7 @@ with real work: each phase is useful on its own, and each has a reversal.
 
 - `scripts/ledger.py init` in the project that hurts most (the one whose sessions keep re-discovering
   what was already done).
-- Add `.ledger/` to that project's `.gitignore`: the ledger is local state, like `.security/` or
+- Add `.ledger/` to that project's `.gitignore`: the ledger is local state, like `.venv/` or
   `.code-inventory/`.
 - Discipline, for one week: `request` when asked, `result --evidence` when finished, `failure` when a
   dead end is found, `resume` at the start of every session.

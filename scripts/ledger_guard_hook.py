@@ -25,7 +25,9 @@ import re
 import subprocess
 import sys
 
-HELPER = os.path.expanduser("~/.hermes/scripts/ledger")
+# Convention: the installer puts the wrapper in <hermes-home>/scripts/ledger. Override with LEDGER_CLI
+# when the wrapper lives somewhere else (another home, a container, a test harness).
+HELPER = os.environ.get("LEDGER_CLI") or os.path.expanduser("~/.hermes/scripts/ledger")
 MUTATING = {"write_file", "patch", "edit_file", "apply_patch", "multi_edit"}
 COMMIT_RE = re.compile(r"\bgit\s+(?:-C\s+\S+\s+)?(?:commit|push)\b")
 

@@ -128,7 +128,7 @@ class PerAgent(unittest.TestCase):
         self.dir = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.dir, True)
 
-    def run_ledger(self, *args, scope='imc', agent=None, items=None):
+    def run_ledger(self, *args, scope='proj', agent=None, items=None):
         cmd = [sys.executable, str(LEDGER), '--dir', self.dir, '--scope', scope]
         if agent:
             cmd += ['--agent', agent]
@@ -142,27 +142,27 @@ class PerAgent(unittest.TestCase):
         return sorted(p.name for p in pathlib.Path(self.dir).glob('*.db'))
 
     def test_each_agent_gets_its_own_file(self):
-        self.run_ledger('init', agent='orchestrator')
-        self.run_ledger('request', 'route the round', agent='orchestrator')
-        self.run_ledger('init', agent='opencode-coder')
-        self.run_ledger('request', 'fix the UI table', agent='opencode-coder')
-        self.assertIn('imc.orchestrator.db', self.files())
-        self.assertIn('imc.opencode-coder.db', self.files())
-        self.assertNotIn('route the round', self.run_ledger('resume', agent='opencode-coder'))
-        self.assertNotIn('fix the UI table', self.run_ledger('resume', agent='orchestrator'))
+        self.run_ledger('init', agent='lead')
+        self.run_ledger('request', 'route the round', agent='lead')
+        self.run_ledger('init', agent='worker')
+        self.run_ledger('request', 'fix the UI table', agent='worker')
+        self.assertIn('proj.lead.db', self.files())
+        self.assertIn('proj.worker.db', self.files())
+        self.assertNotIn('route the round', self.run_ledger('resume', agent='worker'))
+        self.assertNotIn('fix the UI table', self.run_ledger('resume', agent='lead'))
 
     def test_the_single_agent_case_keeps_the_plain_name(self):
         self.run_ledger('init')
-        self.assertEqual(self.files(), ['imc.db'])
+        self.assertEqual(self.files(), ['proj.db'])
 
     def test_team_shows_every_agent_open_work(self):
-        self.run_ledger('init', agent='orchestrator')
-        self.run_ledger('request', 'route the round', agent='orchestrator')
-        self.run_ledger('init', agent='unfiltered')
-        self.run_ledger('request', 'reproduce the 20 findings', agent='unfiltered')
+        self.run_ledger('init', agent='lead')
+        self.run_ledger('request', 'route the round', agent='lead')
+        self.run_ledger('init', agent='reviewer')
+        self.run_ledger('request', 'reproduce the 20 findings', agent='reviewer')
         out = self.run_ledger('team')
-        self.assertIn('## orchestrator', out)
-        self.assertIn('## unfiltered', out)
+        self.assertIn('## lead', out)
+        self.assertIn('## reviewer', out)
         self.assertIn('route the round', out)
         self.assertIn('reproduce the 20 findings', out)
 
@@ -178,23 +178,23 @@ class PerAgent(unittest.TestCase):
 
     def test_agent_falls_back_to_the_profile_directory_in_hermes_home(self):
         """A bot shell does not export HERMES_PROFILE, but HERMES_HOME names the profile."""
-        env = clean_env(HERMES_HOME='/home/someone/.hermes/profiles/aurora-opencode-coder')
-        out = subprocess.run([sys.executable, str(LEDGER), '--dir', self.dir, '--scope', 'imc', 'status', '--json'],
+        env = clean_env(HERMES_HOME='/home/someone/.hermes/profiles/worker')
+        out = subprocess.run([sys.executable, str(LEDGER), '--dir', self.dir, '--scope', 'proj', 'status', '--json'],
                              capture_output=True, text=True, env=env, cwd=self.dir)
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
-        self.assertEqual(json.loads(out.stdout)['agent'], 'aurora-opencode-coder')
+        self.assertEqual(json.loads(out.stdout)['agent'], 'worker')
 
     def test_without_hermes_home_the_agent_is_default(self):
         env = clean_env()
-        out = subprocess.run([sys.executable, str(LEDGER), '--dir', self.dir, '--scope', 'imc', 'status', '--json'],
+        out = subprocess.run([sys.executable, str(LEDGER), '--dir', self.dir, '--scope', 'proj', 'status', '--json'],
                              capture_output=True, text=True, env=env, cwd=self.dir)
         self.assertEqual(json.loads(out.stdout)['agent'], 'default')
 
     def test_status_reports_agent_and_file(self):
-        self.run_ledger('init', agent='orchestrator')
-        payload = json.loads(self.run_ledger('status', '--json', agent='orchestrator'))
-        self.assertEqual(payload['agent'], 'orchestrator')
-        self.assertTrue(payload['file'].endswith('imc.orchestrator.db'))
+        self.run_ledger('init', agent='lead')
+        payload = json.loads(self.run_ledger('status', '--json', agent='lead'))
+        self.assertEqual(payload['agent'], 'lead')
+        self.assertTrue(payload['file'].endswith('proj.lead.db'))
         self.assertEqual(payload['items'], 80)
 
 
