@@ -51,8 +51,23 @@ def redact(text):
     return text
 
 
-def scope_dir(value, directory):
-    return Path(directory or '.ledger').resolve() / f'{value}.db'
+def scope_dir(value, directory, agent='default'):
+    """One file per scope and per agent: two bots on one repository must not pool their threads.
+
+    The single-agent case keeps the plain `<scope>.db` name; anything else gets `<scope>.<agent>.db`.
+    """
+    base = Path(directory or '.ledger').resolve()
+    if agent in ('default', ''):
+        return base / f'{value}.db'
+    return base / f'{value}.{agent}.db'
+
+
+def team_files(value, directory):
+    """Every agent's ledger for a scope: `<scope>.db` plus `<scope>.<agent>.db`."""
+    base = Path(directory or '.ledger').resolve()
+    if not base.is_dir():
+        return []
+    return sorted([p for p in base.glob(f'{value}*.db') if not p.name.endswith(('-wal', '-shm'))])
 
 
 def connect(path, create=True):
@@ -124,6 +139,14 @@ def set_status(conn, tid, status, note=''):
                  (status, now() if status in ('done', 'dropped') else None, redact(note), tid))
 
 
+def stored_items(conn):
+    row = conn.execute("SELECT value FROM meta WHERE key='items'").fetchone()
+    try:
+        return int(row['value']) if row else 80
+    except (TypeError, ValueError):
+        return 80
+
+
 def recent_tasks(conn, statuses, limit=40):
     marks = ','.join('?' * len(statuses))
     return conn.execute(
@@ -139,17 +162,37 @@ def global_events(conn, kinds, limit):
                         (*kinds, limit)).fetchall()
 
 
-def pack(conn, scope, budget=4000):
-    """The context a fresh session reads instead of the conversation it lost."""
-    open_tasks = recent_tasks(conn, ('open', 'in_progress', 'blocked'))
-    done_tasks = recent_tasks(conn, ('done',), limit=5)
-    decisions = global_events(conn, ('decision',), 6)
-    failures = global_events(conn, ('failure',), 5)
-    actions = global_events(conn, ('result', 'action'), 8)
-    notes = global_events(conn, ('note',), 6)
+def caps(items):
+    """How many rows each section of the pack may carry, from one number.
 
-    out = [f'# Ledger · {scope}', '',
-           f'{len(open_tasks)} open · {len(done_tasks)} recently closed · pack {budget} chars', '',
+    The weight follows what is expensive to lose: open work first, then the evidence of what was
+    done, then the decisions and dead ends that a fresh session cannot reconstruct. The minimums keep
+    a small `--items` from starving a section entirely.
+    """
+    return {
+        'open': max(10, int(items * 0.50)),
+        'actions': max(4, int(items * 0.15)),
+        'decisions': max(3, int(items * 0.12)),
+        'failures': max(3, int(items * 0.10)),
+        'notes': max(2, int(items * 0.08)),
+        'closed': max(3, int(items * 0.05)),
+    }
+
+
+def pack(conn, scope, agent='default', items=80, budget=None):
+    """The context a fresh session reads instead of the conversation it lost."""
+    c = caps(items)
+    budget = budget or items * 160
+    open_tasks = recent_tasks(conn, ('open', 'in_progress', 'blocked'), c['open'])
+    done_tasks = recent_tasks(conn, ('done',), limit=c['closed'])
+    decisions = global_events(conn, ('decision',), c['decisions'])
+    failures = global_events(conn, ('failure',), c['failures'])
+    actions = global_events(conn, ('result', 'action'), c['actions'])
+    notes = global_events(conn, ('note',), c['notes'])
+
+    label = scope if agent in ('default', '') else f'{scope} · {agent}'
+    out = [f'# Ledger · {label}', '',
+           f'{len(open_tasks)} open · {len(done_tasks)} recently closed · up to {items} items · pack {budget} chars', '',
            '## Open work']
     if not open_tasks:
         out.append('- (nothing open)')
@@ -215,9 +258,14 @@ def main():
     ap = argparse.ArgumentParser(prog='ledger', description='Append-only work memory: what was asked, what was done.')
     ap.add_argument('--dir', default=None, help='ledger directory (default: .ledger)')
     ap.add_argument('--scope', default=None, help='scope name (default: the directory name)')
+    ap.add_argument('--agent', default=None,
+                    help="whose memory this is: one ledger per agent and scope (default: $HERMES_PROFILE, else 'default')")
+    ap.add_argument('--items', type=int, default=None,
+                    help='how many important items the pack may carry (default: 80)')
     sub = ap.add_subparsers(dest='cmd', required=True)
 
-    sub.add_parser('init', help='create the ledger for this scope')
+    p = sub.add_parser('init', help='create the ledger for this scope')
+    p.add_argument('--items', dest='items_local', type=int, default=None, help='item budget for the packs (default 80)')
     p = sub.add_parser('request', help='record something that was asked'); p.add_argument('text'); p.add_argument('--actor', default='user')
     p = sub.add_parser('action', help='record work in progress'); p.add_argument('text'); p.add_argument('--task'); p.add_argument('--evidence', default='')
     p = sub.add_parser('result', help='record finished work; evidence is required'); p.add_argument('text'); p.add_argument('--task'); p.add_argument('--evidence', required=True)
@@ -225,7 +273,12 @@ def main():
     p = sub.add_parser('decision', help='record a decision and why'); p.add_argument('text'); p.add_argument('--why', default=''); p.add_argument('--task')
     p = sub.add_parser('note', help='anything else worth keeping'); p.add_argument('text'); p.add_argument('--task')
     p = sub.add_parser('close', help='close or block a task'); p.add_argument('--task', required=True); p.add_argument('--status', choices=['blocked', 'dropped'], required=True); p.add_argument('--note', default='')
-    p = sub.add_parser('resume', help='print the context pack a fresh session should read'); p.add_argument('--budget', type=int, default=4000)
+    p = sub.add_parser('resume', help='print the context pack a fresh session should read')
+    p.add_argument('--budget', type=int, default=None, help='hard cap in characters (default: items x 160)')
+    # distinct dests: a subparser default would otherwise overwrite the global --items
+    p.add_argument('--items', dest='items_local', type=int, default=None, help='override the item count for this call')
+    p = sub.add_parser('team', help="every agent's open work for this scope, side by side")
+    p.add_argument('--items', dest='items_local', type=int, default=None)
     p = sub.add_parser('search', help='full-text search over the log'); p.add_argument('query'); p.add_argument('--limit', type=int, default=10)
     p = sub.add_parser('status', help='one-screen state, JSON with --json'); p.add_argument('--json', action='store_true')
     sub.add_parser('check', help='integrity: results without evidence, secrets, stale work, index gaps')
@@ -233,10 +286,35 @@ def main():
 
     args = ap.parse_args()
     scope = args.scope or Path.cwd().name
-    db = scope_dir(scope, args.dir)
+    agent = args.agent or os.environ.get('HERMES_PROFILE') or 'default'
+    db = scope_dir(scope, args.dir, agent)
+
+    if args.cmd == 'team':
+        files = team_files(scope, args.dir)
+        if not files:
+            print(f'no ledgers for scope {scope} in {Path(args.dir or ".ledger").resolve()}')
+            return 0
+        for path in files:
+            who = path.stem[len(scope):].lstrip('.') or 'default'
+            conn = connect(path, create=False)
+            if conn is None:
+                continue
+            try:
+                c = caps(getattr(args, 'items_local', None) or args.items or 80)
+                rows = recent_tasks(conn, ('open', 'in_progress', 'blocked'), c['open'])
+                print(f'## {who} — {len(rows)} open')
+                for t in rows:
+                    # ids repeat across ledgers on purpose; the agent prefix is what disambiguates
+                    print(f'- {who}/{t["id"]} [{t["status"]}] {t["title"][:120]}')
+                if not rows:
+                    print('- (nothing open)')
+            finally:
+                conn.close()
+        return 0
 
     if args.cmd == 'status' and not db.is_file():
-        print(json.dumps({'scope': scope, 'exists': False, 'open_tasks': 0}) if args.json else
+        print(json.dumps({'scope': scope, 'agent': agent, 'file': str(db), 'exists': False,
+                          'open_tasks': 0}) if args.json else
               f'no ledger for scope {scope} ({db}); run: ledger init')
         return 0
 
@@ -248,7 +326,10 @@ def main():
     try:
         with Lock(Path(db).with_suffix('.lock')):
             if args.cmd == 'init':
-                add_event(conn, 'note', 'ledger initialised', actor='system')
+                add_event(conn, 'note', f'ledger initialised for {agent}', actor='system')
+                conn.execute("INSERT OR REPLACE INTO meta VALUES('items', ?)",
+                             (str(getattr(args, 'items_local', None) or args.items or 80),))
+                conn.execute("INSERT OR REPLACE INTO meta VALUES('agent', ?)", (agent,))
                 conn.commit()
                 print(f'{db}')
             elif args.cmd == 'request':
@@ -272,7 +353,8 @@ def main():
                 get_task(conn, args.task); set_status(conn, args.task, args.status, args.note)
                 add_event(conn, 'note', f'{args.task} -> {args.status}: {args.note}', task=args.task); conn.commit(); print(args.task, args.status)
             elif args.cmd == 'resume':
-                print(pack(conn, scope, args.budget), end='')
+                print(pack(conn, scope, agent,
+                           getattr(args, 'items_local', None) or args.items or stored_items(conn), args.budget), end='')
             elif args.cmd == 'search':
                 rows = conn.execute('''SELECT e.id, e.at, e.kind, e.task_id, e.text, e.evidence
                                        FROM events_fts f JOIN events e ON e.id=f.rowid
@@ -285,7 +367,8 @@ def main():
                     print(f'{r["at"][:16]} [{r["kind"]}] {r["text"][:200]}{ev}')
             elif args.cmd == 'status':
                 counts = {s: conn.execute('SELECT COUNT(*) FROM tasks WHERE status=?', (s,)).fetchone()[0] for s in STATUSES}
-                payload = {'scope': scope, 'exists': True, 'tasks': counts,
+                payload = {'scope': scope, 'agent': agent, 'file': str(db),
+                           'items': getattr(args, 'items_local', None) or args.items or stored_items(conn), 'tasks': counts,
                            'events': conn.execute('SELECT COUNT(*) FROM events').fetchone()[0],
                            'last_event': conn.execute('SELECT MAX(at) FROM events').fetchone()[0]}
                 print(json.dumps(payload, indent=2) if args.json else

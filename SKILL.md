@@ -36,6 +36,11 @@ makes aggressive purging safe.
 - *Scope* is the unit that owns its own commitments: a repository, a deployment, a client. One ledger
   per scope, never one global file — two projects in one ledger means a request for A shows up as
   pending while working on B, and a decision taken for A silently constrains B.
+- *Agent* is who is doing the work. A ledger is per **(scope, agent)** pair: `imc.orchestrator.db`,
+  `imc.opencode-coder.db`. Two bots on one repository that share a ledger see each other's tasks as
+  their own open work and answering "what did *I* do" becomes impossible; the same applies to a worker
+  and the bot that reviews it. `ledger team` is the read-only view across agents for one scope, which
+  is how the orchestrator sees what each bot is carrying without pooling their memory.
 - *Both sides* matters because they fail differently. Requests without actions and the agent knows
   what to do but not what it did: it redoes finished work and re-proposes rejected ideas. Actions
   without requests and it knows what it did but not why: it cannot tell a finished task from an
@@ -43,10 +48,10 @@ makes aggressive purging safe.
 
 The unit is the **task**, and its state is *derived from events*, never typed in by hand.
 
-## The ledger: one file per scope
+## The ledger: one file per scope and agent
 
-`<dir>/<scope>.db` — SQLite, one file, driven by `scripts/ledger.py`. DDL, CLI surface and the pack
-format are in `references/ledger-schema.md`.
+`<dir>/<scope>.<agent>.db` (`<scope>.db` when the agent is `default`) — SQLite, one file, driven by
+`scripts/ledger.py`. DDL, CLI surface and the pack format are in `references/ledger-schema.md`.
 
 - `events` — append-only: `request`, `action`, `result`, `failure`, `decision`, `note`. Corrections are
   new events; history is never rewritten, because the value of the ledger is that it can be audited
@@ -79,6 +84,10 @@ Rules that make it trustworthy:
    exactly the turn that mattered.
 4. **Assemble the pack** (`resume`): open work, the decisions that constrain it, failed attempts,
    recent results with their evidence. Bounded — a pack that does not fit the budget stops being read.
+   The size is one number: `--items` (default 80) splits across the sections by what is expensive to
+   lose (open work half, evidence 15%, decisions 12%, failures 10%, notes 8%, closed 5%), and the
+   character budget defaults to `items × 160`. Raise it for a long engagement (`init --items 200`),
+   lower it for a chatty one; the choice is stored in the ledger.
 5. **Do the work.**
 6. **Append actions and the result with evidence**: the command and its real output, the test name,
    `path:line`. "Done" is not evidence; the artifact is.
@@ -165,7 +174,9 @@ Full detail in `references/anti-patterns.md`:
 
 ## Checklist
 
-- [ ] One ledger per scope, keyed to the working directory, never to the prompt.
+- [ ] One ledger per **(scope, agent)**, keyed to the working directory and the bot's identity, never
+      to the prompt; `team` for the cross-agent view.
+- [ ] The pack size is a stated number (`--items`, default 80) and fits what the next session can read.
 - [ ] Requests stored verbatim; failures and decisions stored with their reason.
 - [ ] Tasks derived from events; `done` implies a `result` with evidence.
 - [ ] `resume` is the first action of every fresh session, and fits the budget.

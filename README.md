@@ -24,10 +24,12 @@ tests/test_ledger.py            11 tests: verbatim requests, evidence-required r
                                 bounded pack, FTS search, scope isolation, integrity check
 ```
 
-## Why per scope, and why both sides
+## Why per scope *and* per agent, and why both sides
 
-- **Per scope.** One ledger per repository or deployment. A shared ledger makes a request for one
-  project show up as pending in another, and a local decision look like a global rule.
+- **Per (scope, agent).** One file per repository *and* per bot: `imc.orchestrator.db` next to
+  `imc.opencode-coder.db`. Pooling them means each bot sees the other's tasks as its own open work,
+  and "what did I do" has no answer. `ledger team --scope imc` prints every agent's open work for the
+  scope without merging the memories.
 - **Both sides.** Requests only and the agent redoes work and re-proposes rejected designs. Actions
   only and it cannot tell finished from abandoned. The pair is what makes the record usable.
 
@@ -44,6 +46,15 @@ $L failure "stored a paraphrase of the request" --evidence "the exact wording wa
 $L decision "one SQLite file per scope" --why "projects must not bleed"
 $L resume                                               # the pack a fresh session reads first
 $L check                                                # integrity: evidence, secrets, stale work
+
+# one bot per ledger, same repository
+python3 scripts/ledger.py --scope imc --agent code-orchestrator request "priorizar el round"
+python3 scripts/ledger.py --scope imc --agent code-orchestrator resume
+python3 scripts/ledger.py --scope imc team               # every agent's open work, side by side
+
+# capacity: one number, default 80 items, stored per ledger
+python3 scripts/ledger.py --scope imc --agent code-orchestrator init --items 200
+python3 scripts/ledger.py --scope imc --agent code-orchestrator resume --items 40   # one-off
 ```
 
 `result` refuses to run without `--evidence`, and `check` fails a task marked done without one. That
@@ -52,9 +63,9 @@ asymmetry is deliberate: "done" is a claim, the artifact is proof.
 ## What the pack looks like
 
 ```
-# Ledger · my-project
+# Ledger · my-project · code-orchestrator
 
-2 open · 3 recently closed · pack 4000 chars
+2 open · 3 recently closed · up to 80 items · pack 12800 chars
 
 ## Open work
 - T0003 [open] purgar contexto sin perder el hilo

@@ -113,5 +113,68 @@ class Ledger(unittest.TestCase):
         self.assertIn('Needs Diego', pack)
 
 
+class PerAgent(unittest.TestCase):
+    """Each bot keeps its own memory of the same repository."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir, True)
+
+    def run_ledger(self, *args, scope='imc', agent=None, items=None):
+        cmd = [sys.executable, str(LEDGER), '--dir', self.dir, '--scope', scope]
+        if agent:
+            cmd += ['--agent', agent]
+        if items:
+            cmd += ['--items', str(items)]
+        r = subprocess.run(cmd + list(args), capture_output=True, text=True, cwd=self.dir)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        return r.stdout
+
+    def files(self):
+        return sorted(p.name for p in pathlib.Path(self.dir).glob('*.db'))
+
+    def test_each_agent_gets_its_own_file(self):
+        self.run_ledger('init', agent='orchestrator')
+        self.run_ledger('request', 'route the round', agent='orchestrator')
+        self.run_ledger('init', agent='opencode-coder')
+        self.run_ledger('request', 'fix the UI table', agent='opencode-coder')
+        self.assertIn('imc.orchestrator.db', self.files())
+        self.assertIn('imc.opencode-coder.db', self.files())
+        self.assertNotIn('route the round', self.run_ledger('resume', agent='opencode-coder'))
+        self.assertNotIn('fix the UI table', self.run_ledger('resume', agent='orchestrator'))
+
+    def test_the_single_agent_case_keeps_the_plain_name(self):
+        self.run_ledger('init')
+        self.assertEqual(self.files(), ['imc.db'])
+
+    def test_team_shows_every_agent_open_work(self):
+        self.run_ledger('init', agent='orchestrator')
+        self.run_ledger('request', 'route the round', agent='orchestrator')
+        self.run_ledger('init', agent='unfiltered')
+        self.run_ledger('request', 'reproduce the 20 findings', agent='unfiltered')
+        out = self.run_ledger('team')
+        self.assertIn('## orchestrator', out)
+        self.assertIn('## unfiltered', out)
+        self.assertIn('route the round', out)
+        self.assertIn('reproduce the 20 findings', out)
+
+    def test_items_scales_the_pack_and_persists(self):
+        self.run_ledger('init', '--items', '120')      # the natural place: after the subcommand
+        for i in range(30):
+            self.run_ledger('request', f'request {i}')
+        small = self.run_ledger('resume', items=20)
+        big = self.run_ledger('resume', items=200)
+        self.assertLessEqual(small.count('- T'), 12)
+        self.assertGreaterEqual(big.count('- T'), 30)
+        self.assertIn('up to 120 items', self.run_ledger('resume'))  # the stored default
+
+    def test_status_reports_agent_and_file(self):
+        self.run_ledger('init', agent='orchestrator')
+        payload = json.loads(self.run_ledger('status', '--json', agent='orchestrator'))
+        self.assertEqual(payload['agent'], 'orchestrator')
+        self.assertTrue(payload['file'].endswith('imc.orchestrator.db'))
+        self.assertEqual(payload['items'], 80)
+
+
 if __name__ == '__main__':
     unittest.main()

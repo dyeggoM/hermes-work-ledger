@@ -5,8 +5,14 @@ agent reads after a purge. The reference implementation is `scripts/ledger.py`; 
 
 ## Storage
 
-One database per scope: `<dir>/<scope>.db` (default dir `.ledger`, default scope = directory name).
-A sidecar `.lock` file sits beside it, and SQLite's `-wal`/`-shm` files appear while it is open.
+One database per **(scope, agent)**: `<dir>/<scope>.<agent>.db`, or `<dir>/<scope>.db` when the agent
+is `default`. Default dir `.ledger`; default scope is the directory name; default agent is
+`$HERMES_PROFILE` when set, else `default`. A sidecar `.lock` file sits beside it, and SQLite's
+`-wal`/`-shm` files appear while it is open.
+
+Two bots on one repository must not share a file: the orchestrator's requests would appear as the
+coder's open work. `team` reads every `<scope>*.db` in the directory and prints each agent's open
+tasks with an `agent/T0001` prefix.
 
 ```sql
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -60,7 +66,7 @@ for target, migration in MIGRATIONS:                      # [(1, sql), (2, sql),
 ```bash
 L="python3 scripts/ledger.py --dir .ledger --scope my-project"
 
-$L init                                  # create; prints the path
+$L init [--items 80]                     # create; prints the path, stores the item budget
 $L request "Purgar contexto sin perder el hilo"     # -> T0001 (verbatim, actor=user)
 $L action  --task T0001 "ledger.py written" --evidence "scripts/ledger.py"
 $L result  --task T0001 "CLI works" --evidence "11 tests OK"   # evidence is required
@@ -68,7 +74,8 @@ $L failure "storing a paraphrase of the request" --evidence "the exact wording i
 $L decision "one SQLite file per scope" --why "projects must not bleed"
 $L note    "the deploy key lives in the vault, not here"
 $L close   --task T0002 --status blocked --note "waiting on the repo"
-$L resume  [--budget 4000]               # the pack
+$L resume  [--items N] [--budget CHARS]  # the pack
+$L team                                  # every agent's open work for this scope
 $L search  "zip-slip OR extractall"      # FTS5, with evidence
 $L status  [--json]                      # counts per status
 $L check                                 # integrity; exit 1 on problems
@@ -76,25 +83,27 @@ $L reindex                               # rebuild the FTS table
 ```
 
 `--scope` defaults to the working directory's name: the scope comes from where you are, never from the
-prompt. `--dir` defaults to `.ledger`.
+prompt. `--agent` defaults to `$HERMES_PROFILE`, then `default`. `--dir` defaults to `.ledger`.
 
 ## The pack (`resume`)
 
 The exact sections, in order, and why each one is there:
 
-| Section | Rows | Why |
-|---|---|---|
-| header | 1 | scope, open count, budget |
-| Open work | up to 40 | every `open` / `in_progress` / `blocked` task with its last event |
-| Decisions that constrain the next step | 6 | the *why* is what a fresh session cannot reconstruct |
-| Already tried and failed — do not repeat | 5 | the most expensive line to lose |
-| Recent work, with its evidence | 8 | proves what is done; a line reading `NO EVIDENCE` is a flag |
-| Notes worth keeping | 6 | context that belongs to no task |
-| Recently closed | 5 | so "did I already finish this?" has an answer |
+Section sizes come from one number, `--items` (default 80), split by what is expensive to lose:
 
-Bounded twice: a per-section row limit (the normal case) and a hard `--budget` in characters with a
-`… truncated` marker (for one oversized entry). A pack over ~4 KB stops being read by the agent, which
-is the same as not having one.
+| Section | Share | At `--items 80` | Why |
+|---|---|---|---|
+| Open work | 50% (min 10) | up to 40 | every `open` / `in_progress` / `blocked` task with its last event |
+| Recent work, with its evidence | 15% (min 4) | up to 12 | proves what is done; `NO EVIDENCE` is a flag |
+| Decisions that constrain the next step | 12% (min 3) | up to 9 | the *why* is what a fresh session cannot reconstruct |
+| Already tried and failed — do not repeat | 10% (min 3) | up to 8 | the most expensive line to lose |
+| Notes worth keeping | 8% (min 2) | up to 6 | context that belongs to no task |
+| Recently closed | 5% (min 3) | up to 4 | so "did I already finish this?" has an answer |
+
+`init --items N` stores the preference in `meta`; `resume --items N` overrides it for one call. The
+character budget defaults to `items × 160` (80 items → 12 800 chars) and is a second, hard bound with
+a `… truncated` marker for a single oversized entry. A pack much past that stops being read, which is
+the same as not having one — raise `--items` only when the next session genuinely needs the depth.
 
 ## Integrity (`check`)
 
@@ -111,6 +120,7 @@ Warnings — the ledger is drifting:
 
 ## Sizing notes
 
-- The pack is read at every session start: keep it under ~4 KB, and let `search` carry depth.
+- The pack is read at every session start: 80 items is ~12 KB, which is the honest ceiling for a
+  brief. Beyond that, let `search` carry the depth.
 - `events` grows ~1 row per action; a year of daily work is a few MB, and FTS5 keeps queries flat.
 - `failure` and `decision` are the two kinds that earn their space back. Never prune them first.
