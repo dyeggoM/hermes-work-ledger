@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Canonical entry point for the work ledger: fixed directory, scope from the repository name.
+#
+# Two defaults the raw CLI cannot guess:
+#   - a central directory so a ledger is not lost when a worktree is deleted;
+#   - the scope from the git remote, so every worktree, clone and bot agrees on it.
+#
+# The agent dimension comes from $HERMES_PROFILE, so each bot writes its own file.
+# Override anything with LEDGER_DIR / LEDGER_SCOPE / HERMES_PROFILE.
+set -euo pipefail
+
+self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ledger_py="${LEDGER_PY:-}"
+if [[ -z "$ledger_py" ]]; then
+  if [[ -f "$self_dir/ledger.py" ]]; then ledger_py="$self_dir/ledger.py"
+  else ledger_py="$HOME/.hermes/repos/hermes-work-ledger/scripts/ledger.py"; fi
+fi
+
+scope="${LEDGER_SCOPE:-}"
+if [[ -z "$scope" ]]; then
+  root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  scope="$(git -C "$root" config --get remote.origin.url 2>/dev/null | sed -E 's#.*/##; s#\.git$##' || true)"
+  [[ -n "$scope" ]] || scope="$(basename "$root")"
+fi
+
+exec python3 "$ledger_py" --dir "${LEDGER_DIR:-$HOME/.hermes/ledgers}" --scope "$scope" "$@"

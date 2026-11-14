@@ -24,6 +24,17 @@ tests/test_ledger.py            11 tests: verbatim requests, evidence-required r
                                 bounded pack, FTS search, scope isolation, integrity check
 ```
 
+## Enforcement
+
+`scripts/ledger_guard_hook.py` is a Hermes `pre_tool_call` shell hook: it blocks `write_file`,
+`patch` and `git commit`/`git push` while the calling bot has no open task in the scope, and returns
+the exact command that unblocks it. Reads are never blocked. `scripts/install-enforcement.sh <profile>`
+wires it into a profile's `config.yaml`; the rule it enforces is stated in the repository's
+`AGENTS.md` and the profile's `HANDOVER.md`/`SOUL.md`.
+
+Why shell hooks and not a plugin — the plugin path was tried, was reported as enabled, and never
+fired on this host: `references/enforcement.md` has the measurements and the rollout order.
+
 ## Why per scope *and* per agent, and why both sides
 
 - **Per (scope, agent).** One file per repository *and* per bot: `imc.orchestrator.db` next to
