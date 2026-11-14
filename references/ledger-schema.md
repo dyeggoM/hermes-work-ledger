@@ -83,7 +83,9 @@ $L reindex                               # rebuild the FTS table
 ```
 
 `--scope` defaults to the working directory's name: the scope comes from where you are, never from the
-prompt. `--agent` defaults to `$HERMES_PROFILE`, then `default`. `--dir` defaults to `.ledger`.
+prompt. `--agent` resolves in this order: `--agent`, `$HERMES_PROFILE`, `profiles/<name>` parsed out
+of `$HERMES_HOME`, then `default` — a bot's shell does not export `HERMES_PROFILE`, so without the
+`HERMES_HOME` step every bot silently writes into the `default` ledger. `--dir` defaults to `.ledger`.
 
 ## The pack (`resume`)
 

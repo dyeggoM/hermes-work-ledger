@@ -139,6 +139,20 @@ def set_status(conn, tid, status, note=''):
                  (status, now() if status in ('done', 'dropped') else None, redact(note), tid))
 
 
+def default_agent():
+    """Which bot is running this.
+
+    A bot's shell does not always export HERMES_PROFILE, but it does run with HERMES_HOME pointing at
+    its profile directory. Without the second fallback every bot writes into the `default` ledger and
+    the per-agent isolation silently disappears.
+    """
+    explicit = os.environ.get('HERMES_PROFILE')
+    if explicit:
+        return explicit
+    m = re.search(r'[/\\]profiles[/\\]([^/\\]+)[/\\]?$', os.environ.get('HERMES_HOME') or '')
+    return m.group(1) if m else 'default'
+
+
 def stored_items(conn):
     row = conn.execute("SELECT value FROM meta WHERE key='items'").fetchone()
     try:
@@ -286,7 +300,7 @@ def main():
 
     args = ap.parse_args()
     scope = args.scope or Path.cwd().name
-    agent = args.agent or os.environ.get('HERMES_PROFILE') or 'default'
+    agent = args.agent or default_agent()
     db = scope_dir(scope, args.dir, agent)
 
     if args.cmd == 'team':

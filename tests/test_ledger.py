@@ -3,6 +3,14 @@ import json, os, pathlib, shutil, sqlite3, subprocess, sys, tempfile, unittest
 LEDGER = pathlib.Path(__file__).resolve().parents[1] / 'scripts' / 'ledger.py'
 
 
+def clean_env(**overrides):
+    """Subprocess env without the ambient Hermes profile: the CLI reads HERMES_PROFILE/HERMES_HOME,
+    so a test running inside a bot profile would otherwise pick that profile's agent."""
+    env = {k: v for k, v in os.environ.items() if k not in ('HERMES_PROFILE', 'HERMES_HOME')}
+    env.update(overrides)
+    return env
+
+
 class Ledger(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()
@@ -10,7 +18,7 @@ class Ledger(unittest.TestCase):
 
     def run_ledger(self, *args, scope='proj'):
         return subprocess.run([sys.executable, str(LEDGER), '--dir', self.dir, '--scope', scope, *args],
-                              capture_output=True, text=True, cwd=self.dir)
+                              capture_output=True, text=True, cwd=self.dir, env=clean_env())
 
     def ok(self, *args, scope='proj'):
         r = self.run_ledger(*args, scope=scope)
@@ -126,7 +134,7 @@ class PerAgent(unittest.TestCase):
             cmd += ['--agent', agent]
         if items:
             cmd += ['--items', str(items)]
-        r = subprocess.run(cmd + list(args), capture_output=True, text=True, cwd=self.dir)
+        r = subprocess.run(cmd + list(args), capture_output=True, text=True, cwd=self.dir, env=clean_env())
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r.stdout
 
@@ -167,6 +175,20 @@ class PerAgent(unittest.TestCase):
         self.assertLessEqual(small.count('- T'), 12)
         self.assertGreaterEqual(big.count('- T'), 30)
         self.assertIn('up to 120 items', self.run_ledger('resume'))  # the stored default
+
+    def test_agent_falls_back_to_the_profile_directory_in_hermes_home(self):
+        """A bot shell does not export HERMES_PROFILE, but HERMES_HOME names the profile."""
+        env = clean_env(HERMES_HOME='/home/someone/.hermes/profiles/aurora-opencode-coder')
+        out = subprocess.run([sys.executable, str(LEDGER), '--dir', self.dir, '--scope', 'imc', 'status', '--json'],
+                             capture_output=True, text=True, env=env, cwd=self.dir)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(json.loads(out.stdout)['agent'], 'aurora-opencode-coder')
+
+    def test_without_hermes_home_the_agent_is_default(self):
+        env = clean_env()
+        out = subprocess.run([sys.executable, str(LEDGER), '--dir', self.dir, '--scope', 'imc', 'status', '--json'],
+                             capture_output=True, text=True, env=env, cwd=self.dir)
+        self.assertEqual(json.loads(out.stdout)['agent'], 'default')
 
     def test_status_reports_agent_and_file(self):
         self.run_ledger('init', agent='orchestrator')
