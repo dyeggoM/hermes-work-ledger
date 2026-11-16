@@ -91,6 +91,15 @@ policy gate, the config-level hook is both simpler and the one that demonstrably
 - **Scope from the process cwd.** Bots run with `cwd=$HERMES_HOME`, so the first version resolved
   scope `.hermes` and told a coder to init a ledger for the home directory. Resolve from the target
   path in `tool_input`, then from `cwd`.
+- **Scope from the target path *alone*.** The mirror image of the above: a write to a scratch file
+  (`<profile>/cache/scratch/x.py`) is in no checkout, so the wrapper fell back to the directory name
+  and the guard blocked the call demanding `init` for a phantom scope `scratch`. Walk up from the
+  target to the nearest `.git`; if there is none and the session cwd is not a checkout either, allow
+  the call — a temporary changes no project's code, and the guard is about recorded work, not about
+  forbidding scratch space.
+- **`close --status done`.** `close` accepts only `blocked` and `dropped`; completion is the `result`
+  event's job. A bot following a hand-written sequence that calls `close --status done` gets a usage
+  error mid-backfill and leaves half the events unwritten. Record the `result` and stop there.
 - **Agent from `$HERMES_PROFILE` alone.** Gateways do not always export it; the hook falls back to
   parsing `profiles/<name>` out of `$HERMES_HOME`.
 - **Blocking every `terminal` call.** Reads stop, the agent cannot even look at the ledger it is

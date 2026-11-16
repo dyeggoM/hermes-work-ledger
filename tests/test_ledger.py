@@ -121,6 +121,45 @@ class Ledger(unittest.TestCase):
         self.assertIn('Needs Diego', pack)
 
 
+class SearchIndexSlots(unittest.TestCase):
+    """An orphan FTS row must not swallow the next event (it did before: the append died on UNIQUE)."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.db_path = pathlib.Path(self.dir) / 'proj.db'
+        self.run_ledger('init')
+        self.run_ledger('request', 'first')
+
+    def run_ledger(self, *args):
+        r = subprocess.run([sys.executable, str(LEDGER), '--dir', self.dir, '--scope', 'proj', *args],
+                           capture_output=True, text=True, cwd=self.dir, env=clean_env())
+        return r
+
+    def test_an_orphan_index_row_does_not_block_the_next_append(self):
+        conn = sqlite3.connect(self.db_path)
+        nxt = conn.execute('SELECT COALESCE(MAX(id), 0) + 1 FROM events').fetchone()[0]
+        # what a transaction that died between the two inserts leaves behind
+        conn.execute('INSERT INTO events_fts(rowid,text,evidence,why) VALUES(?,?,?,?)',
+                     (nxt, 'phantom', '', ''))
+        conn.commit(); conn.close()
+
+        r = self.run_ledger('request', 'second')
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        pack = self.run_ledger('resume').stdout
+        self.assertIn('second', pack)
+        self.assertNotIn('phantom', pack)
+
+    def test_check_names_the_orphan(self):
+        conn = sqlite3.connect(self.db_path)
+        nxt = conn.execute('SELECT COALESCE(MAX(id), 0) + 1 FROM events').fetchone()[0]
+        conn.execute('INSERT INTO events_fts(rowid,text,evidence,why) VALUES(?,?,?,?)',
+                     (nxt, 'phantom', '', ''))
+        conn.commit(); conn.close()
+        out = self.run_ledger('check')
+        self.assertIn('orphan', out.stdout.lower())
+
+
 class PerAgent(unittest.TestCase):
     """Each bot keeps its own memory of the same repository."""
 

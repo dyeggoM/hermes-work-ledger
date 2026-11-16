@@ -57,6 +57,18 @@ def call_site(args: dict, payload: dict) -> str:
     return str(payload.get("cwd") or os.getcwd())
 
 
+def repo_root(start: str) -> str | None:
+    """Nearest directory at or above ``start`` that is a git checkout, else None."""
+    path = os.path.abspath(start or ".")
+    while True:
+        if os.path.isdir(os.path.join(path, ".git")):
+            return path
+        parent = os.path.dirname(path)
+        if parent == path:
+            return None
+        path = parent
+
+
 def status(cwd: str, agent: str):
     try:
         out = subprocess.run([HELPER, "--agent", agent, "status", "--json"], cwd=cwd or None,
@@ -84,7 +96,15 @@ def main() -> int:
         return 0
 
     agent = profile_agent()
-    state = status(call_site(args, payload), agent)
+    site = call_site(args, payload)
+    root = repo_root(site) or repo_root(str(payload.get("cwd") or ""))
+    if root is None:
+        # A file outside every checkout (scratch, cache, /tmp) changes no project's code, so there is
+        # no scope whose ledger it belongs to. Blocking it only stops the bot from working — and the
+        # guard is about what gets recorded, not about forbidding temporaries. Measured: resolving the
+        # scope from the path alone created a phantom scope 'scratch' and blocked a backfill script.
+        return 0
+    state = status(root, agent)
     if state is None:
         return 0
     scope, agent = state.get("scope", "this scope"), state.get("agent", "this profile")
