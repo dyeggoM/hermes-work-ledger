@@ -118,7 +118,11 @@ Problems (exit 1) — each one means the ledger is lying about the work:
 Warnings — the ledger is drifting:
 
 - tasks with no activity for 14 days (stale, or abandoned without being closed);
-- events missing from the FTS index (`reindex`).
+- events missing from the FTS index (`reindex`);
+- orphan rows in the FTS index (`rowid` with no event). Harmless to read, fatal to write: `events.id`
+  is a rowid alias without AUTOINCREMENT, so the next append reuses that rowid and the UNIQUE on
+  `events_fts` aborts the whole transaction — the event is silently lost. `add_event` clears the slot
+  before inserting, so the append survives, and `reindex` is what removes the orphan.
 
 ## Sizing notes
 

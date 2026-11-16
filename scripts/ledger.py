@@ -115,6 +115,10 @@ def add_event(conn, kind, text, task=None, evidence='', why='', actor='agent', a
     at = at or now()
     cur = conn.execute('INSERT INTO events(at,kind,task_id,text,evidence,why,actor) VALUES(?,?,?,?,?,?,?)',
                        (at, kind, task, redact(text), redact(evidence), redact(why), actor))
+    # events.id is a rowid alias without AUTOINCREMENT, so it reuses max(id)+1 after a rolled-back
+    # insert. An orphan FTS row with that rowid (a transaction that died between the two inserts)
+    # then fails the UNIQUE on events_fts and the whole append is lost. Clear the slot first.
+    conn.execute('DELETE FROM events_fts WHERE rowid=?', (cur.lastrowid,))
     conn.execute('INSERT INTO events_fts(rowid,text,evidence,why) VALUES(?,?,?,?)',
                  (cur.lastrowid, redact(text), redact(evidence), redact(why)))
     return cur.lastrowid
@@ -265,6 +269,9 @@ def check(conn, stale_days=14):
     missing = conn.execute('SELECT COUNT(*) FROM events WHERE id NOT IN (SELECT rowid FROM events_fts)').fetchone()[0]
     if missing:
         warnings.append(f'{missing} event(s) missing from the search index; rebuild with `reindex`')
+    orphan = conn.execute('SELECT COUNT(*) FROM events_fts WHERE rowid NOT IN (SELECT id FROM events)').fetchone()[0]
+    if orphan:
+        warnings.append(f'{orphan} orphan row(s) in the search index; rebuild with `reindex`')
     return problems, warnings
 
 
